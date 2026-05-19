@@ -2,12 +2,12 @@
 
 # Comprovem si s'executa com a root
 if [ "$EUID" -ne 0 ]; then
-  echo "Aquest script s'ha d'executar amb sudo: sudo ./preparar_domini.sh"
+  echo "Aquest script s'ha d'executar amb sudo: sudo ./n.sh"
   exit
 fi
 
 echo "=================================================="
-echo "💣 MODE DESTRUCCIÓ I RECREACIÓ TOTAL DE SAMBA AD DC"
+echo "💣 INSTAL·LACIÓ ABSOLUTA I CONFIGURACIÓ DE DOMINI"
 echo "=================================================="
 
 # Variables del domini
@@ -17,62 +17,69 @@ PASS="P@ssword2026!"
 IP="192.168.2.100"
 HOSTNAME="sambaserver-bfp"
 
-echo "1. Aturant tots els serveis conflictius..."
-systemctl stop smbd nmbd winbind samba-ad-dc systemd-resolved 2>/dev/null
-systemctl disable systemd-resolved 2>/dev/null
+echo "1. Matant absolutament tots els serveis que bloquegen ports..."
+# Aturem el slapd (OpenLDAP) que et robava el port 389 i feia petar el Samba
+systemctl stop slapd smbd nmbd winbind samba-ad-dc systemd-resolved 2>/dev/null
+systemctl disable slapd smbd nmbd winbind systemd-resolved 2>/dev/null
 
-echo "2. Desinstal·lant completament Samba i Kerberos..."
-# Evitem que l'assistent d'instal·lació ens faci preguntes per pantalla
+echo "2. Purgant paquets vells per evitar configuracions corruptes..."
 export DEBIAN_FRONTEND=noninteractive
-apt-get purge -y samba smbclient winbind krb5-config krb5-user samba-common samba-common-bin
+apt-get purge -y samba smbclient winbind krb5-config krb5-user samba-common samba-common-bin slapd 2>/dev/null
 apt-get autoremove -y
 
-echo "3. Eliminant qualsevol rastre de configuració vella..."
+echo "3. Netejant directoris de dades i memòria cau..."
 rm -rf /etc/samba /var/lib/samba /var/cache/samba /var/log/samba /etc/krb5.conf
 kdestroy -A 2>/dev/null
 
-echo "4. Tornant a instal·lar Samba net de fàbrica..."
+echo "4. Instal·lant paquets nets de fàbrica..."
 apt-get update
 apt-get install -y samba smbclient winbind krb5-user krb5-config libpam-winbind libnss-winbind
 
-echo "5. Configurant /etc/hosts correctament..."
-sed -i "/$HOSTNAME/d" /etc/hosts
-echo "$IP $HOSTNAME.$REALM $HOSTNAME" >> /etc/hosts
+echo "5. Reescrivint completament el fitxer /etc/hosts..."
+# Clavem tota la teva llista d'IPs de la captura de forma endreçada i neta
+cat <<EOF > /etc/hosts
+127.0.0.1 localhost
+127.0.1.1 $HOSTNAME
 
-echo "6. Alliberant el port 53 (DNS) i forçant resolv.conf..."
-chattr -i /etc/resolv.conf 2>/dev/null # Per si de cas estava bloquejat
+$IP $HOSTNAME.$REALM $HOSTNAME
+192.168.2.11 w11-1-bfp.dom-linux-bfp.lan dom-linux-bfp.lan
+192.168.2.12 w11-2-bfp.dom-linux-bfp.lan dom-linux-bfp.lan
+192.168.2.11 linuxcli.dom-linux-bfp.lan dom-linux-bfp.lan
+192.168.2.12 linuxcli2.dom-linux-bfp.lan dom-linux-bfp.lan
+192.168.1.2  w11-2-bfp
+192.168.2.11 ldap-bfp.dom-linux-bfp.lan ldap-bfp
+
+# The following lines are desirable for IPv6 capable hosts
+::1     localhost ip6-localhost ip6-loopback
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+EOF
+
+echo "6. Configurant el sistema DNS local de Samba..."
+chattr -i /etc/resolv.conf 2>/dev/null
 rm -f /etc/resolv.conf
 echo "domain $REALM" > /etc/resolv.conf
 echo "search $REALM" >> /etc/resolv.conf
 echo "nameserver 127.0.0.1" >> /etc/resolv.conf
-chattr +i /etc/resolv.conf # El bloquegem perquè Debian no el canviï sol al reiniciar
+chattr +i /etc/resolv.conf
 
-echo "7. Creant el domini Active Directory (Provisió)..."
-# Esborrem l'smb.conf que crea la nova instal·lació per defecte
-rm -f /etc/samba/smb.conf 
+echo "7. Executant la provisió de l'Active Directory..."
 samba-tool domain provision --use-rfc2307 --realm="$REALM" --domain="$DOMAIN" --adminpass="$PASS" --server-role=dc --dns-backend=SAMBA_INTERNAL
 
-echo "8. Configurant el client de Kerberos..."
+echo "8. Enllaçant fitxer de Kerberos..."
 cp /var/lib/samba/private/krb5.conf /etc/krb5.conf
 
-echo "9. Desactivant serveis clàssics i iniciant Active Directory..."
-systemctl stop smbd nmbd winbind 2>/dev/null
-systemctl disable smbd nmbd winbind 2>/dev/null
+echo "9. Engegant el servei correcte (samba-ad-dc)..."
 systemctl unmask samba-ad-dc
 systemctl enable samba-ad-dc
 systemctl start samba-ad-dc
 
-echo "10. Esperant 5 segons a que arrenqui el motor de Samba..."
+echo "10. Esperant l'estabilització del sistema (5 segons)..."
 sleep 5
 
-echo "11. Forçant l'escriptura dels registres DNS (SRV)..."
+echo "11. Sincronitzant registres DNS interns..."
 samba_dnsupdate --verbose --force
 
 echo "=================================================="
-echo "✅ DESTRUCCIÓ I INSTAL·LACIÓ FINALITZADA AMB ÈXIT!"
-echo "--------------------------------------------------"
-echo "Dades per unir el teu Windows:"
-echo "- Domini: $REALM"
-echo "- Usuari: Administrator"
-echo "- Contrasenya: $PASS"
+echo "✅ CORRECTE! SERVIDORS REDREÇATS I DOMINI AIXECAT"
 echo "=================================================="
