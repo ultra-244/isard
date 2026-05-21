@@ -1,0 +1,27 @@
+#!/bin/bash
+# ==============================================================================
+# EXERCICI 2: Gestió d'usuaris i grups del domini
+# ==============================================================================
+
+ADMIN_PASS="S3cur3P@ssw0rd!"
+
+echo "[*] Creant els usuaris de domini..."
+samba-tool user create usuari1 "$ADMIN_PASS"
+samba-tool user create usuari2 "$ADMIN_PASS"
+
+echo "[*] Creant el grup g_samba..."
+samba-tool group add g_samba
+
+echo "[*] Afegint usuaris al grup g_samba..."
+samba-tool group addmembers g_samba usuari1,usuari2
+
+echo ""
+echo "==================================================================="
+echo " SORTIDES PER A LES CAPTURES DE L'EXERCICI 2"
+echo "==================================================================="
+echo "[Captura 1] Llista completa d'usuaris inicial del domini:"
+samba-tool user list
+echo ""
+echo "[Captura 2] Verificació de membres del grup g_samba:"
+samba-tool group listmembers g_samba
+echo "==================================================================="
